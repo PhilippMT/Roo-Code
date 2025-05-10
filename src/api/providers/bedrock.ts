@@ -7,6 +7,7 @@ import {
 } from "@aws-sdk/client-bedrock-runtime"
 import { fromIni } from "@aws-sdk/credential-providers"
 import { Anthropic } from "@anthropic-ai/sdk"
+import { BetaThinkingConfigParam } from "@anthropic-ai/sdk/resources/beta/messages/index.mjs"
 import { SingleCompletionHandler } from "../"
 import {
 	BedrockModelId,
@@ -216,6 +217,22 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			topP: 0.1,
 		}
 
+		// Add thinking configuration if the model supports it
+		if (modelConfig.info.thinking && this.options.modelMaxThinkingTokens) {
+			// Clamp the thinking budget to be at most 80% of max tokens and at least 1024 tokens
+			const maxBudgetTokens = Math.floor((modelConfig.info.maxTokens || 4096) * 0.8)
+			const budgetTokens = Math.max(
+				Math.min(this.options.modelMaxThinkingTokens, maxBudgetTokens),
+				1024
+			)
+			
+			// Add thinking configuration to the inference config
+			;(inferenceConfig as any).thinking = {
+				enabled: true,
+				budget_tokens: budgetTokens,
+			}
+		}
+
 		const payload = {
 			modelId: modelConfig.id,
 			messages: formatted.messages,
@@ -369,60 +386,66 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
+		let modelConfig = this.getModel()
+		const inferenceConfig: BedrockInferenceConfig = {
+			maxTokens: modelConfig.info.maxTokens as number,
+			temperature: this.options.modelTemperature as number,
+			topP: 0.1,
+		}
+
+		// Add thinking configuration if the model supports it
+		if (modelConfig.info.thinking && this.options.modelMaxThinkingTokens) {
+			// Clamp the thinking budget to be at most 80% of max tokens and at least 1024 tokens
+			const maxBudgetTokens = Math.floor((modelConfig.info.maxTokens || 4096) * 0.8)
+			const budgetTokens = Math.max(
+				Math.min(this.options.modelMaxThinkingTokens, maxBudgetTokens),
+				1024
+			)
+			
+			// Add thinking configuration to the inference config
+			;(inferenceConfig as any).thinking = {
+				enabled: true,
+				budget_tokens: budgetTokens,
+			}
+		}
+
+		const messages: Message[] = [
+			{
+				role: "user",
+				content: [
+					{
+						text: prompt,
+					},
+				],
+			},
+		]
+
+		const payload = {
+			modelId: modelConfig.id,
+			messages,
+			inferenceConfig,
+		}
+
 		try {
-			const modelConfig = this.getModel()
-
-			const inferenceConfig: BedrockInferenceConfig = {
-				maxTokens: modelConfig.info.maxTokens as number,
-				temperature: this.options.modelTemperature as number,
-				topP: 0.1,
-			}
-
-			// For completePrompt, use a unique conversation ID based on the prompt
-			const conversationId = `prompt_${prompt.substring(0, 20)}`
-
-			const payload = {
-				modelId: modelConfig.id,
-				messages: this.convertToBedrockConverseMessages(
-					[
-						{
-							role: "user",
-							content: prompt,
-						},
-					],
-					undefined,
-					false,
-					modelConfig.info,
-					conversationId,
-				).messages,
-				inferenceConfig,
-			}
-
 			const command = new ConverseCommand(payload)
 			const response = await this.client.send(command)
 
-			if (
-				response?.output?.message?.content &&
-				response.output.message.content.length > 0 &&
-				response.output.message.content[0].text &&
-				response.output.message.content[0].text.trim().length > 0
-			) {
-				try {
-					return response.output.message.content[0].text
-				} catch (parseError) {
-					logger.error("Failed to parse Bedrock response", {
-						ctx: "bedrock",
-						error: parseError instanceof Error ? parseError : String(parseError),
-					})
+			if (!response.output?.message?.content) {
+				throw new Error("No content in response")
+			}
+
+			// Extract text from content blocks
+			let result = ""
+			for (const block of response.output.message.content) {
+				if (block.text) {
+					result += block.text
 				}
 			}
-			return ""
+
+			return result
 		} catch (error) {
-			// Use the extracted error handling method for all errors
 			const errorResult = this.handleBedrockError(error, false) // false for non-streaming context
-			// Since we're in a non-streaming context, we know the result is a string
-			const errorMessage = errorResult as string
-			throw new Error(errorMessage)
+			return errorResult as string
 		}
 	}
 

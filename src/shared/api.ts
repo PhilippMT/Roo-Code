@@ -176,6 +176,8 @@ export const bedrockModels = {
 		maxCachePoints: 4,
 		cachableFields: ["system", "messages", "tools"],
 	},
+
+\t"anthropic.claude-3-7-sonnet-20250219-v1:0:thinking": {\n\t\tmaxTokens: 128_000,\n\t\tcontextWindow: 200_000,\n\t\tsupportsImages: true,\n\t\tsupportsComputerUse: true,\n\t\tsupportsPromptCache: true,\n\t\tinputPrice: 3.0,\n\t\toutputPrice: 15.0,\n\t\tcacheWritesPrice: 3.75,\n\t\tcacheReadsPrice: 0.3,\n\t\tminTokensPerCachePoint: 1024,\n\t\tmaxCachePoints: 4,\n\t\tcachableFields: ["system", "messages", "tools"],\n\t\tthinking: true,\n\t},
 	"anthropic.claude-3-5-sonnet-20241022-v2:0": {
 		maxTokens: 8192,
 		contextWindow: 200_000,
